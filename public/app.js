@@ -105,3 +105,11 @@ setInterval(async () => {
   const medicamentos = await resposta.json();
   verificarHorarios(medicamentos);
 }, 60000);
+// Registrar o Service Worker (torna o app instalável e funciona offline)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(() => console.log('Service Worker registrado com sucesso'))
+      .catch((erro) => console.log('Erro ao registrar Service Worker:', erro));
+  });
+}
