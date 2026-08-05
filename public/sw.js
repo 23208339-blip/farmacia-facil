@@ -1,4 +1,4 @@
-const CACHE_NAME = 'farmacia-facil-v1';
+const CACHE_NAME = 'farmacia-facil-v2';
 const ARQUIVOS_PARA_CACHE = [
   '/',
   '/index.html',
@@ -7,14 +7,13 @@ const ARQUIVOS_PARA_CACHE = [
   '/icons/icon-512.png'
 ];
 
-// Instala o service worker e guarda os arquivos essenciais em cache
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ARQUIVOS_PARA_CACHE))
   );
+  self.skipWaiting();
 });
 
-// Remove caches antigos quando uma nova versão é ativada
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((nomes) =>
@@ -23,13 +22,17 @@ self.addEventListener('activate', (event) => {
       )
     )
   );
+  self.clients.claim();
 });
 
-// Serve do cache quando estiver offline, senão busca da rede
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((respostaCache) => {
-      return respostaCache || fetch(event.request);
-    })
+    fetch(event.request)
+      .then((respostaRede) => {
+        const clone = respostaRede.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return respostaRede;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
