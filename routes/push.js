@@ -26,7 +26,10 @@ router.post('/subscribe', async (req, res) => {
 
 // Verifica os horários e envia notificações (chamado pelo GitHub Actions)
 router.post('/verificar', async (req, res) => {
-  const agora = new Date();
+  // Ajusta para o horário de Brasília (UTC-3), já que o servidor roda em UTC
+  const agoraUTC = new Date();
+  const agora = new Date(agoraUTC.getTime() - (3 * 60 * 60 * 1000));
+
   const horaAtual = String(agora.getHours()).padStart(2, '0');
   const minutoAtual = agora.getMinutes();
 
