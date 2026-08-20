@@ -36,3 +36,23 @@ self.addEventListener('fetch', (event) => {
       .catch(() => caches.match(event.request))
   );
 });
+// Escuta por notificações push chegando do servidor
+self.addEventListener('push', (event) => {
+  const dados = event.data ? event.data.json() : {};
+  const titulo = dados.titulo || 'Farmácia Fácil';
+  const opcoes = {
+    body: dados.corpo || 'Você tem um lembrete de medicamento.',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png'
+  };
+
+  event.waitUntil(self.registration.showNotification(titulo, opcoes));
+});
+
+// Quando o usuário toca na notificação, abre o app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.openWindow('/')
+  );
+});

@@ -9,4 +9,8 @@ app.use(express.static('public'));
 
 const medicamentosRoutes = require('./routes/medicamentos');
 app.use('/api/medicamentos', medicamentosRoutes);
+
+const pushRoutes = require('./routes/push');
+app.use('/api/push', pushRoutes);
+
 app.listen(3000, () => console.log('Servidor rodando na porta 3000'));

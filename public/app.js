@@ -1,3 +1,4 @@
+const VAPID_PUBLIC_KEY = 'BIr5e8o3bd7apUb8SvzzFbSOQ3-Jfm7RUv5lY9bhI9M53YtFkLXDtydeUDq6-G9JTumPpXsh7SjcfTZvSqb_19w';
 const form = document.getElementById('form-medicamento');
 const lista = document.getElementById('lista-medicamentos');
 
@@ -136,42 +137,57 @@ async function carregarMedicamentos() {
 
 carregarMedicamentos();
 
-// Pedir permissão para mostrar notificações
-function pedirPermissaoNotificacao() {
-  if ('Notification' in window) {
-    Notification.requestPermission();
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
   }
+  return outputArray;
 }
 
-// Verificar se algum medicamento está no horário agora
-function verificarHorarios(medicamentos) {
-  const agora = new Date();
-  const horaAtual = String(agora.getHours()).padStart(2, '0');
-  const minutoAtual = String(agora.getMinutes()).padStart(2, '0');
-  const agoraFormatado = `${horaAtual}:${minutoAtual}`;
+async function inscreverParaNotificacoes() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.log('Push notifications não são suportadas neste navegador.');
+    return;
+  }
 
-  medicamentos.forEach(m => {
-    if (m.horario.startsWith(agoraFormatado)) {
-      new Notification('Hora do remédio! 💊', {
-        body: `Tome: ${m.nome}${m.dosagem ? ' — ' + m.dosagem : ''}`
-      });
-    }
+  const permissao = await Notification.requestPermission();
+  if (permissao !== 'granted') {
+    console.log('Permissão de notificação negada.');
+    return;
+  }
+
+  const registration = await navigator.serviceWorker.ready;
+
+  let subscription = await registration.pushManager.getSubscription();
+
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+  }
+
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(subscription)
   });
+
+  console.log('Inscrito para notificações push com sucesso.');
 }
-
-pedirPermissaoNotificacao();
-
-setInterval(async () => {
-  const resposta = await fetch('/api/medicamentos');
-  const medicamentos = await resposta.json();
-  verificarHorarios(medicamentos);
-}, 60000);
 
 // Registrar o Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then(() => console.log('Service Worker registrado com sucesso'))
+      .then(() => {
+        console.log('Service Worker registrado com sucesso');
+        inscreverParaNotificacoes();
+      })
       .catch((erro) => console.log('Erro ao registrar Service Worker:', erro));
   });
 }

@@ -1,0 +1,14 @@
+name: Verificar horários de medicamentos
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar rota de verificação
+        run: |
+          curl -X POST https://farmacia-facil.onrender.com/api/push/verificar
