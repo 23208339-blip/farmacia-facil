@@ -37,10 +37,11 @@ form.addEventListener('submit', async (e) => {
   }
 
   const dados = {
-    nome: nomeInput.value,
-    dosagem: document.getElementById('dosagem').value,
-    horario: horarioInput.value
-  };
+  nome: nomeInput.value,
+  dosagem: document.getElementById('dosagem').value,
+  horario: horarioInput.value,
+  data_inicio: document.getElementById('data-inicio').value || null
+};
 
   let resposta;
 
@@ -73,6 +74,7 @@ function entrarNoModoEdicao(medicamento) {
   idEmEdicao = medicamento.id;
   document.getElementById('nome').value = medicamento.nome;
   document.getElementById('dosagem').value = medicamento.dosagem || '';
+  document.getElementById('data-inicio').value = medicamento.data_inicio || '';
   document.getElementById('horario').value = medicamento.horario.slice(0, 5);
 
   const botao = form.querySelector('button[type="submit"]');
@@ -114,16 +116,35 @@ async function carregarMedicamentos() {
   lista.innerHTML = '';
 
   medicamentos.forEach(m => {
-    const card = document.createElement('div');
-    card.className = 'card mb-2 p-3';
-    card.innerHTML = `
-      <strong>${m.nome}</strong> ${m.dosagem ? `— ${m.dosagem}` : ''}<br>
-      <span>Horário: ${m.horario.slice(0, 5)}</span>
-      <div class="mt-2">
-        <button type="button" class="btn btn-outline-primary btn-sm me-2" aria-label="Editar ${m.nome}">Editar</button>
-        <button type="button" class="btn btn-outline-danger btn-sm" aria-label="Excluir ${m.nome}">Excluir</button>
-      </div>
-    `;
+  const card = document.createElement('div');
+  card.className = 'card mb-2 p-3';
+
+  let infoInicio = '';
+  if (m.data_inicio) {
+    const inicio = new Date(m.data_inicio + 'T00:00:00');
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const dias = Math.floor((hoje - inicio) / (1000 * 60 * 60 * 24));
+    const dataFormatada = inicio.toLocaleDateString('pt-BR');
+
+    if (dias === 0) {
+      infoInicio = `<br><span class="text-muted">Em uso desde hoje (${dataFormatada})</span>`;
+    } else if (dias > 0) {
+      infoInicio = `<br><span class="text-muted">Em uso há ${dias} dia${dias > 1 ? 's' : ''} (desde ${dataFormatada})</span>`;
+    } else {
+      infoInicio = `<br><span class="text-muted">Início previsto: ${dataFormatada}</span>`;
+    }
+  }
+
+  card.innerHTML = `
+    <strong>${m.nome}</strong> ${m.dosagem ? `— ${m.dosagem}` : ''}<br>
+    <span>Horário: ${m.horario.slice(0, 5)}</span>
+    ${infoInicio}
+    <div class="mt-2">
+      <button type="button" class="btn btn-outline-primary btn-sm me-2" aria-label="Editar ${m.nome}">Editar</button>
+      <button type="button" class="btn btn-outline-danger btn-sm" aria-label="Excluir ${m.nome}">Excluir</button>
+    </div>
+  `;
 
     const botaoEditar = card.querySelector('.btn-outline-primary');
     const botaoExcluir = card.querySelector('.btn-outline-danger');
