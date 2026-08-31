@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const supabase = require('./supabaseClient');
+const verificarAutenticacao = require('./authMiddleware');
+const criarClienteAutenticado = require('./supabaseComAuth');
 
-// Listar medicamentos do usuário
+// Todas as rotas abaixo exigem autenticação
+router.use(verificarAutenticacao);
+
+// Listar medicamentos do usuário logado
 router.get('/', async (req, res) => {
+  const supabase = criarClienteAutenticado(req.tokenAcesso);
   const { data, error } = await supabase.from('medicamentos').select('*');
   if (error) return res.status(400).json({ error });
   res.json(data);
@@ -11,12 +16,16 @@ router.get('/', async (req, res) => {
 
 // Cadastrar novo medicamento
 router.post('/', async (req, res) => {
-  const { data, error } = await supabase.from('medicamentos').insert([req.body]);
+  const supabase = criarClienteAutenticado(req.tokenAcesso);
+  const dados = { ...req.body, usuario_id: req.usuario.id };
+  const { data, error } = await supabase.from('medicamentos').insert([dados]);
   if (error) return res.status(400).json({ error });
   res.json(data);
 });
+
 // Atualizar um medicamento existente
 router.put('/:id', async (req, res) => {
+  const supabase = criarClienteAutenticado(req.tokenAcesso);
   const { id } = req.params;
   const { data, error } = await supabase
     .from('medicamentos')
@@ -30,6 +39,7 @@ router.put('/:id', async (req, res) => {
 
 // Excluir um medicamento
 router.delete('/:id', async (req, res) => {
+  const supabase = criarClienteAutenticado(req.tokenAcesso);
   const { id } = req.params;
   const { error } = await supabase
     .from('medicamentos')
