@@ -39,6 +39,16 @@
 </head>
 <body>
   <a href="#conteudo-principal" class="visually-hidden-focusable">Pular para o conteúdo principal</a>
+  <div vw class="enabled">
+  <div vw-access-button class="active"></div>
+  <div vw-plugin-wrapper>
+    <div class="vw-plugin-top-wrapper"></div>
+  </div>
+</div>
+<script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
+<script>
+  new window.VLibras.Widget('https://vlibras.gov.br/app');
+</script>
 
   <!-- Tela de Login/Cadastro (visível quando não logado) -->
   <div id="tela-login" class="container py-4" style="max-width: 400px;">
