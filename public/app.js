@@ -12,6 +12,26 @@ const botaoSair = document.getElementById('botao-sair');
 let modoLogin = 'entrar';
 let appJaIniciado = false; // Evita registrar os eventos do app mais de uma vez
 
+// Impede que texto digitado pelo usuário seja interpretado como HTML
+function escaparHtml(texto) {
+  return String(texto ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Diferencia falta de internet de erro de senha
+function erroDeRede(error) {
+  return !navigator.onLine ||
+    error.name === 'AuthRetryableFetchError' ||
+    error.status === 0 ||
+    /fetch|network/i.test(error.message || '');
+}
+
+const MSG_SEM_CONEXAO = 'Não foi possível conectar. Verifique sua internet e tente de novo.';
+
 abaEntrar.addEventListener('click', () => {
   modoLogin = 'entrar';
   abaEntrar.classList.replace('btn-outline-primary', 'btn-primary');
@@ -40,16 +60,22 @@ formLogin.addEventListener('submit', async (e) => {
   mensagemLogin.textContent = '';
   mensagemLogin.className = 'mb-3';
 
+  if (!navigator.onLine) {
+    mensagemLogin.textContent = 'Sem conexão com a internet. Conecte-se para entrar ou criar conta.';
+    mensagemLogin.classList.add('text-danger');
+    return;
+  }
+
   if (modoLogin === 'entrar') {
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password: senha });
     if (error) {
-      mensagemLogin.textContent = 'E-mail ou senha incorretos.';
+      mensagemLogin.textContent = erroDeRede(error) ? MSG_SEM_CONEXAO : 'E-mail ou senha incorretos.';
       mensagemLogin.classList.add('text-danger');
     }
   } else {
     const { error } = await supabaseClient.auth.signUp({ email, password: senha });
     if (error) {
-      mensagemLogin.textContent = 'Erro ao criar conta: ' + error.message;
+      mensagemLogin.textContent = erroDeRede(error) ? MSG_SEM_CONEXAO : 'Erro ao criar conta: ' + error.message;
       mensagemLogin.classList.add('text-danger');
     } else {
       mensagemLogin.textContent = 'Conta criada! Você já pode usar o app.';
@@ -59,6 +85,9 @@ formLogin.addEventListener('submit', async (e) => {
 });
 
 botaoSair.addEventListener('click', async () => {
+  // Remove os dados guardados no aparelho (são dados de saúde)
+  const { data } = await supabaseClient.auth.getSession();
+  if (data.session) localStorage.removeItem(`medicamentos_${data.session.user.id}`);
   await supabaseClient.auth.signOut();
 });
 
@@ -67,11 +96,19 @@ supabaseClient.auth.onAuthStateChange((evento, sessao) => {
     telaLogin.style.display = 'none';
     appPrincipal.style.display = 'block';
     iniciarApp();
+  } else if (evento === 'SIGNED_OUT') {
+    // Recarrega a página para limpar os eventos e evitar cadastros duplicados no próximo login
+    window.location.reload();
   } else {
     telaLogin.style.display = 'block';
     appPrincipal.style.display = 'none';
     appJaIniciado = false;
   }
+});
+
+// Quando a internet volta, atualiza a lista
+window.addEventListener('online', () => {
+  if (window.recarregarMedicamentos) window.recarregarMedicamentos();
 });
 
 async function obterTokenAcesso() {
@@ -102,11 +139,26 @@ function iniciarApp() {
   const VAPID_PUBLIC_KEY = 'BIr5e8o3bd7apUb8SvzzFbSOQ3-Jfm7RUv5lY9bhI9M53YtFkLXDtydeUDq6-G9JTumPpXsh7SjcfTZvSqb_19w';
   const form = document.getElementById('form-medicamento');
   const lista = document.getElementById('lista-medicamentos');
+  const avisoOfflineEl = document.getElementById('aviso-offline');
 
   let idEmEdicao = null;
 
+  function mostrarAvisoOffline(ativo) {
+    if (avisoOfflineEl) avisoOfflineEl.classList.toggle('d-none', !ativo);
+  }
+
+  async function chaveCache() {
+    const { data } = await supabaseClient.auth.getSession(); // lê do aparelho, sem usar a rede
+    return data.session ? `medicamentos_${data.session.user.id}` : null;
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    if (!navigator.onLine) {
+      alert('Sem conexão. Cadastrar e editar exigem internet. Tente de novo quando a conexão voltar.');
+      return;
+    }
 
     const nomeInput = document.getElementById('nome');
     const horarioInput = document.getElementById('horario');
@@ -150,18 +202,23 @@ function iniciarApp() {
     const headers = await headersAutenticados();
     let resposta;
 
-    if (idEmEdicao) {
-      resposta = await fetch(`/api/medicamentos/${idEmEdicao}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify(dados)
-      });
-    } else {
-      resposta = await fetch('/api/medicamentos', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(dados)
-      });
+    try {
+      if (idEmEdicao) {
+        resposta = await fetch(`/api/medicamentos/${idEmEdicao}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(dados)
+        });
+      } else {
+        resposta = await fetch('/api/medicamentos', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(dados)
+        });
+      }
+    } catch (erro) {
+      erroNome.textContent = 'Sem conexão. Tente novamente quando a internet voltar.';
+      return;
     }
 
     if (resposta.ok) {
@@ -193,23 +250,49 @@ function iniciarApp() {
   }
 
   async function excluirMedicamento(id, nome) {
+    if (!navigator.onLine) {
+      alert('Sem conexão. Excluir exige internet. Tente de novo quando a conexão voltar.');
+      return;
+    }
+
     const confirmar = confirm(`Tem certeza que deseja excluir "${nome}"?`);
     if (!confirmar) return;
 
     const headers = await headersAutenticados();
-    const resposta = await fetch(`/api/medicamentos/${id}`, { method: 'DELETE', headers });
 
-    if (resposta.ok) {
-      carregarMedicamentos();
-    } else {
-      alert('Erro ao excluir. Tente novamente.');
+    try {
+      const resposta = await fetch(`/api/medicamentos/${id}`, { method: 'DELETE', headers });
+      if (resposta.ok) {
+        carregarMedicamentos();
+      } else {
+        alert('Erro ao excluir. Tente novamente.');
+      }
+    } catch (erro) {
+      alert('Sem conexão. Tente novamente quando a internet voltar.');
     }
   }
 
   async function carregarMedicamentos() {
-    const headers = await headersAutenticados();
-    const resposta = await fetch('/api/medicamentos', { headers });
-    const medicamentos = await resposta.json();
+    let medicamentos;
+    const chave = await chaveCache();
+
+    try {
+      const headers = await headersAutenticados();
+      const resposta = await fetch('/api/medicamentos', { headers });
+      if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+      medicamentos = await resposta.json();
+      if (chave) localStorage.setItem(chave, JSON.stringify(medicamentos));
+      mostrarAvisoOffline(false);
+    } catch (erro) {
+      // Sem internet ou servidor indisponível: usa os últimos dados salvos neste aparelho
+      const guardado = chave && localStorage.getItem(chave);
+      if (!guardado) {
+        lista.innerHTML = '<p role="alert">Não foi possível carregar os medicamentos. Verifique sua internet.</p>';
+        return;
+      }
+      medicamentos = JSON.parse(guardado);
+      mostrarAvisoOffline(true);
+    }
 
     atualizarGrafico(medicamentos);
 
@@ -241,13 +324,16 @@ function iniciarApp() {
         }
       }
 
+      const nomeSeguro = escaparHtml(m.nome);
+      const dosagemSegura = escaparHtml(m.dosagem);
+
       card.innerHTML = `
-        <strong>${m.nome}</strong> ${m.dosagem ? `— ${m.dosagem}` : ''}<br>
-        <span>Horário: ${m.horario.slice(0, 5)}</span>
+        <strong>${nomeSeguro}</strong> ${m.dosagem ? `— ${dosagemSegura}` : ''}<br>
+        <span>Horário: ${escaparHtml(m.horario.slice(0, 5))}</span>
         ${infoInicio}
         <div class="mt-2">
-          <button type="button" class="btn btn-outline-primary btn-sm me-2" aria-label="Editar ${m.nome}">Editar</button>
-          <button type="button" class="btn btn-outline-danger btn-sm" aria-label="Excluir ${m.nome}">Excluir</button>
+          <button type="button" class="btn btn-outline-primary btn-sm me-2" aria-label="Editar ${nomeSeguro}">Editar</button>
+          <button type="button" class="btn btn-outline-danger btn-sm" aria-label="Excluir ${nomeSeguro}">Excluir</button>
         </div>
       `;
 
@@ -261,6 +347,7 @@ function iniciarApp() {
     });
   }
 
+  window.recarregarMedicamentos = carregarMedicamentos;
   carregarMedicamentos();
 
   // ===== NOTIFICAÇÕES PUSH =====
