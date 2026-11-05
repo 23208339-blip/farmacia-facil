@@ -85,9 +85,6 @@ formLogin.addEventListener('submit', async (e) => {
 });
 
 botaoSair.addEventListener('click', async () => {
-  // Remove os dados guardados no aparelho (são dados de saúde)
-  const { data } = await supabaseClient.auth.getSession();
-  if (data.session) localStorage.removeItem(`medicamentos_${data.session.user.id}`);
   await supabaseClient.auth.signOut();
 });
 
@@ -104,11 +101,6 @@ supabaseClient.auth.onAuthStateChange((evento, sessao) => {
     appPrincipal.style.display = 'none';
     appJaIniciado = false;
   }
-});
-
-// Quando a internet volta, atualiza a lista
-window.addEventListener('online', () => {
-  if (window.recarregarMedicamentos) window.recarregarMedicamentos();
 });
 
 async function obterTokenAcesso() {
@@ -139,26 +131,11 @@ function iniciarApp() {
   const VAPID_PUBLIC_KEY = 'BIr5e8o3bd7apUb8SvzzFbSOQ3-Jfm7RUv5lY9bhI9M53YtFkLXDtydeUDq6-G9JTumPpXsh7SjcfTZvSqb_19w';
   const form = document.getElementById('form-medicamento');
   const lista = document.getElementById('lista-medicamentos');
-  const avisoOfflineEl = document.getElementById('aviso-offline');
 
   let idEmEdicao = null;
 
-  function mostrarAvisoOffline(ativo) {
-    if (avisoOfflineEl) avisoOfflineEl.classList.toggle('d-none', !ativo);
-  }
-
-  async function chaveCache() {
-    const { data } = await supabaseClient.auth.getSession(); // lê do aparelho, sem usar a rede
-    return data.session ? `medicamentos_${data.session.user.id}` : null;
-  }
-
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-
-    if (!navigator.onLine) {
-      alert('Sem conexão. Cadastrar e editar exigem internet. Tente de novo quando a conexão voltar.');
-      return;
-    }
 
     const nomeInput = document.getElementById('nome');
     const horarioInput = document.getElementById('horario');
@@ -250,11 +227,6 @@ function iniciarApp() {
   }
 
   async function excluirMedicamento(id, nome) {
-    if (!navigator.onLine) {
-      alert('Sem conexão. Excluir exige internet. Tente de novo quando a conexão voltar.');
-      return;
-    }
-
     const confirmar = confirm(`Tem certeza que deseja excluir "${nome}"?`);
     if (!confirmar) return;
 
@@ -274,24 +246,15 @@ function iniciarApp() {
 
   async function carregarMedicamentos() {
     let medicamentos;
-    const chave = await chaveCache();
 
     try {
       const headers = await headersAutenticados();
       const resposta = await fetch('/api/medicamentos', { headers });
       if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
       medicamentos = await resposta.json();
-      if (chave) localStorage.setItem(chave, JSON.stringify(medicamentos));
-      mostrarAvisoOffline(false);
     } catch (erro) {
-      // Sem internet ou servidor indisponível: usa os últimos dados salvos neste aparelho
-      const guardado = chave && localStorage.getItem(chave);
-      if (!guardado) {
-        lista.innerHTML = '<p role="alert">Não foi possível carregar os medicamentos. Verifique sua internet.</p>';
-        return;
-      }
-      medicamentos = JSON.parse(guardado);
-      mostrarAvisoOffline(true);
+      lista.innerHTML = '<p role="alert">Não foi possível carregar os medicamentos. Verifique sua internet e atualize a página.</p>';
+      return;
     }
 
     atualizarGrafico(medicamentos);
@@ -364,35 +327,45 @@ function iniciarApp() {
   }
 
   async function inscreverParaNotificacoes() {
+    const status = document.getElementById('status-notificacoes');
+    const mostrar = (texto) => { if (status) status.textContent = texto; };
+
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.log('Push notifications não são suportadas neste navegador.');
+      mostrar('Este navegador não permite lembretes com o aplicativo fechado.');
       return;
     }
 
-    const permissao = await Notification.requestPermission();
-    if (permissao !== 'granted') {
-      console.log('Permissão de notificação negada.');
-      return;
-    }
+    try {
+      let permissao = Notification.permission;
+      if (permissao === 'default') permissao = await Notification.requestPermission();
+      if (permissao !== 'granted') {
+        mostrar('Lembretes desativados. Permita as notificações nas configurações do navegador.');
+        return;
+      }
 
-    const registration = await navigator.serviceWorker.ready;
-    let subscription = await registration.pushManager.getSubscription();
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
 
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }
+
+      const headers = await headersAutenticados();
+      const resposta = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(subscription)
       });
+      if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+
+      mostrar('Lembretes ativados neste aparelho.');
+    } catch (erro) {
+      console.log('Erro ao ativar notificações:', erro);
+      mostrar('Não foi possível ativar os lembretes. Tente novamente mais tarde.');
     }
-
-    const headers = await headersAutenticados();
-    await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(subscription)
-    });
-
-    console.log('Inscrito para notificações push com sucesso.');
   }
 
   if ('serviceWorker' in navigator) {
