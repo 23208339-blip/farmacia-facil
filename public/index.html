@@ -9,7 +9,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#e53935">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <style>
     .visually-hidden-focusable {
       position: absolute;
@@ -132,6 +131,8 @@
       </form>
 
       <h2>Meus medicamentos</h2>
+      <p id="status-notificacoes" class="form-text" role="status"></p>
+      <section id="lista-medicamentos" aria-live="polite" aria-atomic="true"></section>
       <section id="lista-medicamentos" aria-live="polite" aria-atomic="true"></section>
 
       <h2 class="mt-5">Distribuição dos horários</h2>
