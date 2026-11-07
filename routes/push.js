@@ -25,19 +25,13 @@ router.post('/subscribe', verificarAutenticacao, async (req, res) => {
   res.status(201).json({ sucesso: true });
 });
 
-// Verifica os horários e envia notificações (chamado pelo GitHub Actions)
+// Verifica os horários e envia notificações (chamado por agendador externo)
 router.post('/verificar', async (req, res) => {
   // Servidor roda em UTC: converte para horário de Brasília (UTC-3)
   const agora = new Date(Date.now() - 3 * 60 * 60 * 1000);
-
-  // Janela de tolerância: últimos 10 minutos
-  const horariosValidos = [];
-  for (let i = 0; i < 10; i++) {
-    const t = new Date(agora.getTime() - i * 60000);
-    const hh = String(t.getUTCHours()).padStart(2, '0');
-    const mm = String(t.getUTCMinutes()).padStart(2, '0');
-    horariosValidos.push(`${hh}:${mm}`);
-  }
+  const hoje = agora.toISOString().slice(0, 10); // AAAA-MM-DD
+  const minutosAgora = agora.getUTCHours() * 60 + agora.getUTCMinutes();
+  const TOLERANCIA = 30; // avisa até 30 minutos depois do horário
 
   const { data: medicamentos, error: erroMed } = await supabaseAdmin
     .from('medicamentos')
@@ -45,12 +39,15 @@ router.post('/verificar', async (req, res) => {
 
   if (erroMed) return res.status(400).json({ error: erroMed });
 
-  const noHorario = medicamentos.filter(m =>
-    horariosValidos.some(h => m.horario.startsWith(h))
-  );
+  // Medicamentos no horário (ou até 30 min depois) que ainda não foram avisados hoje
+  const pendentes = medicamentos.filter(m => {
+    const [h, min] = m.horario.split(':').map(Number);
+    const atraso = minutosAgora - (h * 60 + min);
+    return atraso >= 0 && atraso < TOLERANCIA && m.ultimo_aviso !== hoje;
+  });
 
-  if (noHorario.length === 0) {
-    return res.json({ enviados: 0, mensagem: 'Nenhum medicamento no horário agora.' });
+  if (pendentes.length === 0) {
+    return res.json({ enviados: 0, mensagem: 'Nenhum medicamento pendente agora.' });
   }
 
   const { data: inscricoes, error: erroSub } = await supabaseAdmin
@@ -61,9 +58,9 @@ router.post('/verificar', async (req, res) => {
 
   let enviados = 0;
 
-  for (const medicamento of noHorario) {
-    // Cada medicamento só notifica os dispositivos do seu próprio dono
+  for (const medicamento of pendentes) {
     const dispositivos = inscricoes.filter(i => i.usuario_id === medicamento.usuario_id);
+    let enviouParaAlgum = false;
 
     for (const dispositivo of dispositivos) {
       try {
@@ -75,12 +72,21 @@ router.post('/verificar', async (req, res) => {
           })
         );
         enviados++;
+        enviouParaAlgum = true;
       } catch (erro) {
         // Inscrição inválida (app desinstalado etc.): remove do banco
         if (erro.statusCode === 410 || erro.statusCode === 404) {
           await supabaseAdmin.from('push_subscriptions').delete().eq('endpoint', dispositivo.endpoint);
         }
       }
+    }
+
+    // Marca como avisado hoje, para não repetir a notificação
+    if (enviouParaAlgum) {
+      await supabaseAdmin
+        .from('medicamentos')
+        .update({ ultimo_aviso: hoje })
+        .eq('id', medicamento.id);
     }
   }
 

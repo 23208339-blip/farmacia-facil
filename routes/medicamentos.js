@@ -29,7 +29,7 @@ router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase
     .from('medicamentos')
-    .update(req.body)
+    .update({ ...req.body, ultimo_aviso: null })
     .eq('id', id)
     .select();
 
