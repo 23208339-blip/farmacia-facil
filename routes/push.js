@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const webpush = require('web-push');
-const supabase = require('./supabaseClient');
+const supabaseAdmin = require('./supabaseAdmin');
+const verificarAutenticacao = require('./authMiddleware');
 
 webpush.setVapidDetails(
   'mailto:contato@farmaciafacil.com',
@@ -9,14 +10,14 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-// Salva a inscrição de um dispositivo para receber notificações
-router.post('/subscribe', async (req, res) => {
+// Salva a inscrição do dispositivo, vinculada ao usuário logado
+router.post('/subscribe', verificarAutenticacao, async (req, res) => {
   const subscription = req.body;
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('push_subscriptions')
     .upsert(
-      { endpoint: subscription.endpoint, subscription },
+      { endpoint: subscription.endpoint, subscription, usuario_id: req.usuario.id },
       { onConflict: 'endpoint' }
     );
 
@@ -26,36 +27,33 @@ router.post('/subscribe', async (req, res) => {
 
 // Verifica os horários e envia notificações (chamado pelo GitHub Actions)
 router.post('/verificar', async (req, res) => {
-  // Ajusta para o horário de Brasília (UTC-3), já que o servidor roda em UTC
-  const agoraUTC = new Date();
-  const agora = new Date(agoraUTC.getTime() - (3 * 60 * 60 * 1000));
+  // Servidor roda em UTC: converte para horário de Brasília (UTC-3)
+  const agora = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
-  const horaAtual = String(agora.getHours()).padStart(2, '0');
-  const minutoAtual = agora.getMinutes();
-
-  // Janela de tolerância: considera "na hora" se estiver nos últimos 10 minutos
-  const minutosValidos = [];
+  // Janela de tolerância: últimos 10 minutos
+  const horariosValidos = [];
   for (let i = 0; i < 10; i++) {
-    const m = minutoAtual - i;
-    if (m >= 0) minutosValidos.push(String(m).padStart(2, '0'));
+    const t = new Date(agora.getTime() - i * 60000);
+    const hh = String(t.getUTCHours()).padStart(2, '0');
+    const mm = String(t.getUTCMinutes()).padStart(2, '0');
+    horariosValidos.push(`${hh}:${mm}`);
   }
-  const horariosValidos = minutosValidos.map(m => `${horaAtual}:${m}`);
 
-  const { data: medicamentos, error: erroMed } = await supabase
+  const { data: medicamentos, error: erroMed } = await supabaseAdmin
     .from('medicamentos')
     .select('*');
 
   if (erroMed) return res.status(400).json({ error: erroMed });
 
-  const medicamentosNoHorario = medicamentos.filter(m =>
+  const noHorario = medicamentos.filter(m =>
     horariosValidos.some(h => m.horario.startsWith(h))
   );
 
-  if (medicamentosNoHorario.length === 0) {
+  if (noHorario.length === 0) {
     return res.json({ enviados: 0, mensagem: 'Nenhum medicamento no horário agora.' });
   }
 
-  const { data: inscricoes, error: erroSub } = await supabase
+  const { data: inscricoes, error: erroSub } = await supabaseAdmin
     .from('push_subscriptions')
     .select('*');
 
@@ -63,11 +61,14 @@ router.post('/verificar', async (req, res) => {
 
   let enviados = 0;
 
-  for (const inscricao of inscricoes) {
-    for (const medicamento of medicamentosNoHorario) {
+  for (const medicamento of noHorario) {
+    // Cada medicamento só notifica os dispositivos do seu próprio dono
+    const dispositivos = inscricoes.filter(i => i.usuario_id === medicamento.usuario_id);
+
+    for (const dispositivo of dispositivos) {
       try {
         await webpush.sendNotification(
-          inscricao.subscription,
+          dispositivo.subscription,
           JSON.stringify({
             titulo: 'Hora do remédio! 💊',
             corpo: `Tome: ${medicamento.nome}${medicamento.dosagem ? ' — ' + medicamento.dosagem : ''}`
@@ -75,9 +76,9 @@ router.post('/verificar', async (req, res) => {
         );
         enviados++;
       } catch (erro) {
-        // Se a inscrição não é mais válida (usuário desinstalou, etc), remove do banco
+        // Inscrição inválida (app desinstalado etc.): remove do banco
         if (erro.statusCode === 410 || erro.statusCode === 404) {
-          await supabase.from('push_subscriptions').delete().eq('endpoint', inscricao.endpoint);
+          await supabaseAdmin.from('push_subscriptions').delete().eq('endpoint', dispositivo.endpoint);
         }
       }
     }
